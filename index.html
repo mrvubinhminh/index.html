@@ -1,0 +1,1301 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trình Chiếu Ảnh Từ Google Drive</title>
+    <!-- Tích hợp Tailwind CSS qua CDN để định dạng giao diện nhanh chóng và đẹp mắt -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Cấu hình phông chữ mặc định và hiệu ứng chuyển đổi mượt mà */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* MỚI: Định dạng cho khung 16:9 giống giao diện Desktop App */
+        .app-container-16-9 {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            max-height: calc(100vh - 2rem);
+            margin: auto;
+        }
+        /* Đảm bảo khi màn hình quá rộng, ứng dụng không bị giãn sai tỷ lệ 16:9 */
+        @media (min-aspect-ratio: 16/9) {
+            .app-container-16-9 {
+                width: calc((100vh - 2rem) * 16 / 9);
+                height: calc(100vh - 2rem);
+            }
+        }
+        /* Tuỳ chỉnh thanh cuộn siêu mỏng thanh lịch cho Sidebar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent; 
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        /* MỚI: Các hiệu ứng chuyển cảnh */
+        .slide-right-in { animation: slideRightIn 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+        .slide-left-in { animation: slideLeftIn 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+        .zoom-out-effect { animation: zoomOut 0.6s ease-out forwards; }
+        .flip-3d-effect { animation: flip3D 0.7s ease-out forwards; }
+        .dissolve-effect { animation: dissolve 0.8s ease-in-out forwards; }
+
+        @keyframes slideRightIn { from { transform: translateX(50%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes slideLeftIn { from { transform: translateX(-50%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes zoomOut { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flip3D { from { transform: perspective(1000px) rotateY(90deg); opacity: 0; } to { transform: perspective(1000px) rotateY(0deg); opacity: 1; } }
+        @keyframes dissolve { from { filter: blur(8px) brightness(1.2); opacity: 0; } to { filter: blur(0) brightness(1); opacity: 1; } }
+
+        /* Style riêng cho vùng hiển thị ảnh (Đã được điều chỉnh để chiếm 100% không gian) */
+        #image-container {
+            width: 100%;
+            height: 100%;
+        }
+        #result-image, #result-video {
+            width: 100%;
+            height: 100%; 
+            object-fit: contain; 
+            display: none; 
+        }
+    </style>
+    <!-- Load font Inter từ Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="h-screen w-screen flex items-center justify-center p-2 sm:p-4 bg-gray-900 overflow-hidden">
+
+    <!-- KHUNG 16:9 BAO BỌC TOÀN BỘ ỨNG DỤNG -->
+    <div class="app-container-16-9 bg-white rounded-xl shadow-2xl flex flex-col md:flex-row overflow-hidden fade-in relative">
+        
+        <!-- SIDEBAR TRÁI (Bảng Điều Khiển) -->
+        <div class="w-full md:w-[320px] lg:w-[380px] bg-gray-50 border-r border-gray-200 flex flex-col h-full z-10 shrink-0">
+            <!-- Header & Tác giả -->
+            <div class="p-4 border-b border-gray-200 bg-white shrink-0">
+                <h1 class="text-xl lg:text-2xl font-bold text-gray-800 mb-1.5 tracking-tight">Trình Chiếu Ảnh</h1>
+                <div class="inline-block bg-blue-50 border border-blue-100 rounded px-2.5 py-1">
+                    <p class="text-blue-700 font-medium text-[11px] lg:text-xs">
+                        Tác giả: <span class="font-bold">Thầy Vũ Tiến Lực</span><br>
+                        Trường THPT Nguyễn Hữu Cảnh - TP Hồ Chí Minh
+                    </p>
+                </div>
+            </div>
+
+            <!-- Vùng cuộn chứa công cụ (Chỉ thanh này cuộn, không cuộn cả trang) -->
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+                
+                <!-- 3 nút chức năng rút gọn -->
+                <div class="grid grid-cols-2 gap-2">
+                    <label class="cursor-pointer flex flex-col items-center justify-center gap-1 p-2 bg-white hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg border border-gray-200 shadow-sm transition-colors text-center">
+                        <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"></path></svg>
+                        <span>Nhạc nền</span>
+                        <input type="file" id="audio-input" accept="audio/*" class="hidden">
+                    </label>
+                    <label class="cursor-pointer flex flex-col items-center justify-center gap-1 p-2 bg-white hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg border border-gray-200 shadow-sm transition-colors text-center">
+                        <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        <span>Ảnh từ máy</span>
+                        <input type="file" id="local-image-input" accept="image/*,video/mp4,video/webm" multiple class="hidden">
+                    </label>
+                    <label class="col-span-2 cursor-pointer flex justify-center items-center gap-2 p-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg border border-amber-200 shadow-sm transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1"></path></svg>
+                        <span>Mở File (.json) Bài Giảng Đã Lưu</span>
+                        <input type="file" id="import-json-input" accept=".json" class="hidden">
+                    </label>
+                </div>
+                <div id="audio-file-name" class="text-[10px] text-gray-500 truncate text-center -mt-2" title="Chưa chọn nhạc">Chưa chọn nhạc nền</div>
+
+                <!-- Nhập liệu Google Drive -->
+                <div class="bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+                    <p class="text-xs font-bold text-gray-700 mb-2">Hoặc thêm từ Google Drive:</p>
+                    <textarea 
+                        id="drive-link" 
+                        rows="2"
+                        placeholder="Dán link Drive vào đây..." 
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-y"
+                    ></textarea>
+                    <div class="flex flex-col gap-2 mt-2">
+                        <label class="flex items-center gap-2 text-xs text-gray-600 font-medium cursor-pointer">
+                            <input type="checkbox" id="is-drive-video" class="w-3.5 h-3.5 text-blue-600 rounded">
+                            Đánh dấu là Link Video (MP4)
+                        </label>
+                        <button id="view-btn" class="w-full py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 text-sm font-bold rounded-md transition-colors">
+                            Thêm Vào Danh Sách
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Cảnh báo lỗi -->
+                <div id="error-message" class="hidden p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-xs"></div>
+
+                <!-- Danh sách trình chiếu (Playlist) -->
+                <div id="playlist-section" class="hidden flex-col gap-2 fade-in">
+                    <div class="flex justify-between items-center">
+                        <h3 class="font-bold text-sm text-gray-800">Danh sách chiếu</h3>
+                        <button id="export-json-btn" class="text-[10px] font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1 rounded border border-gray-300 transition-colors">Lưu File</button>
+                    </div>
+                    
+                    <select id="transition-effect" class="w-full text-xs p-2 border border-gray-300 rounded-md bg-white text-gray-700 font-medium outline-none">
+                        <option value="fade-in">Hiệu ứng: Mờ dần (Fade)</option>
+                        <option value="slide">Hiệu ứng: Trượt (Slide)</option>
+                        <option value="zoom-out-effect">Hiệu ứng: Thu phóng (Zoom)</option>
+                        <option value="flip-3d-effect">Hiệu ứng: Lật 3D (Flip)</option>
+                        <option value="dissolve-effect">Hiệu ứng: Xóa mờ (Dissolve)</option>
+                    </select>
+
+                    <ul id="sortable-list" class="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-1"></ul>
+                    
+                    <button id="start-presentation-btn" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-md transition-colors shadow-sm mt-1">
+                        Bắt Đầu Trình Chiếu
+                    </button>
+                </div>
+
+                <!-- Hướng dẫn & Tips Dạy học -->
+                <div class="border border-gray-200 rounded-lg bg-white overflow-hidden shadow-sm mt-4">
+                    <div class="p-2.5 bg-gray-50 border-b border-gray-200">
+                        <h3 class="font-bold text-xs text-gray-800">💡 Hướng dẫn & Tips Dạy Học</h3>
+                    </div>
+                    <div class="p-3 text-[11px] text-gray-600 space-y-2 leading-relaxed">
+                        <p>• <b>Chuyển Slide:</b> Phím <kbd class="px-1 border border-gray-300 rounded font-sans bg-gray-50">←</kbd> / <kbd class="px-1 border border-gray-300 rounded font-sans bg-gray-50">→</kbd></p>
+                        <p>• <b>Công cụ:</b> Phím <kbd class="px-1 border border-gray-300 rounded font-sans bg-gray-50">P</kbd> (Bút) | <kbd class="px-1 border border-gray-300 rounded font-sans bg-gray-50">H</kbd> (Dạ quang) | <kbd class="px-1 border border-gray-300 rounded font-sans bg-gray-50">L</kbd> (Laze)</p>
+                        <p>• <b>Thoát công cụ:</b> Phím <kbd class="px-1 border border-gray-300 rounded font-sans bg-gray-50">Esc</kbd></p>
+                        <div class="border-t border-gray-100 my-2 pt-2 text-blue-800">
+                            <b>Tip Sư phạm:</b> Dùng <b>Chế độ Lưới</b> (icon 4 ô vuông dưới ảnh) để hiển thị toàn bộ slide và click mở nhanh câu hỏi học sinh thắc mắc. Nhớ <b>Lưu Danh Sách</b> để dạy ở lớp khác nhé!
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MÀN HÌNH HIỂN THỊ CHÍNH (BÊN PHẢI) -->
+        <div class="flex-1 relative bg-gray-100 flex flex-col overflow-hidden">
+            
+            <div id="image-container" class="relative group bg-gray-200 w-full h-full flex items-center justify-center transition-colors duration-300">
+                
+                <!-- Trạng thái chờ -->
+                <div id="placeholder-text" class="text-gray-400 text-center p-4 z-0 flex flex-col items-center">
+                    <svg class="w-16 h-16 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    <p class="text-sm font-medium">Khu vực trình chiếu</p>
+                    <p class="text-xs opacity-80 mt-1">Vui lòng thêm ảnh vào danh sách và bấm "Bắt Đầu"</p>
+                </div>
+                
+                <!-- Lớp bọc cho chức năng Zoom và Media -->
+                <div id="zoom-wrapper" class="absolute inset-0 w-full h-full transition-transform duration-300 ease-out origin-center flex items-center justify-center">
+                    <img id="result-image" src="" alt="Presentation" class="z-0 relative pointer-events-none">
+                    <video id="result-video" class="z-0 relative" loop playsinline style="display:none;" controls></video>
+                    <canvas id="drawing-canvas" class="absolute inset-0 z-10 hidden w-full h-full"></canvas>
+                </div>
+                
+                <!-- Hiệu ứng Laze -->
+                <div id="laser-dot" class="absolute w-5 h-5 bg-red-500 rounded-full pointer-events-none hidden z-20 shadow-[0_0_20px_6px_rgba(239,68,68,0.9)] -translate-x-1/2 -translate-y-1/2">
+                    <div class="absolute inset-0 bg-white rounded-full m-1.5 opacity-90"></div>
+                </div>
+                
+                <!-- Nút điều hướng nổi -->
+                <button id="prev-btn" class="absolute left-4 top-1/2 -translate-y-1/2 bg-white/50 hover:bg-white text-gray-800 p-3 rounded-full backdrop-blur-sm z-30 hidden transition-all shadow-lg"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
+                <button id="next-btn" class="absolute right-4 top-1/2 -translate-y-1/2 bg-white/50 hover:bg-white text-gray-800 p-3 rounded-full backdrop-blur-sm z-30 hidden transition-all shadow-lg"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
+                
+                <!-- Bộ đếm trang -->
+                <div id="image-counter" class="absolute top-4 right-4 bg-black/60 text-white px-3 py-1 rounded-full text-sm font-semibold z-30 hidden shadow-md backdrop-blur-sm border border-white/10">1 / 1</div>
+
+                <!-- Thanh công cụ trình chiếu (Toolbar) -->
+                <div id="presentation-toolbar" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-md px-3 py-2.5 rounded-full shadow-2xl z-30 hidden items-center gap-1.5 sm:gap-2 border border-gray-200 transition-opacity duration-300 opacity-0 group-hover:opacity-100 flex-wrap justify-center w-max scale-90 sm:scale-100 origin-bottom">
+                    
+                    <button id="grid-view-btn" class="p-2.5 rounded-full hover:bg-indigo-100 text-indigo-600 transition-colors" title="Chế độ Lưới (Q&A)"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg></button>
+                    <div class="w-px h-6 bg-gray-300 mx-0.5"></div>
+
+                    <!-- Cài đặt bút -->
+                    <div id="tool-settings" class="hidden items-center gap-1.5 mr-1 pr-2 border-r border-gray-300">
+                        <input type="color" id="pen-color" value="#ef4444" class="w-7 h-7 rounded cursor-pointer border-0 p-0 shadow-sm" title="Chọn màu mực">
+                        <input type="range" id="pen-size" min="1" max="60" value="3" class="w-16 accent-blue-500 cursor-pointer" title="Độ to nhỏ">
+                    </div>
+
+                    <!-- Công cụ -->
+                    <button data-tool="none" class="tool-btn active p-2.5 rounded-full hover:bg-gray-200 bg-gray-200 text-gray-700 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg></button>
+                    <button data-tool="pen" class="tool-btn p-2.5 rounded-full hover:bg-gray-200 text-gray-700 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button>
+                    <button data-tool="highlighter" class="tool-btn p-2.5 rounded-full hover:bg-gray-200 text-gray-700 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></button>
+                    <button data-tool="laser" class="tool-btn p-2.5 rounded-full hover:bg-gray-200 text-gray-700 transition-colors"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"></circle></svg></button>
+                    <button data-tool="zoom" class="tool-btn p-2.5 rounded-full hover:bg-gray-200 text-gray-700 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg></button>
+                    <div class="w-px h-6 bg-gray-300 mx-0.5"></div>
+                    <button id="clear-canvas" class="p-2.5 rounded-full hover:bg-red-100 text-red-600 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                    
+                    <!-- Media Controls -->
+                    <div class="w-px h-6 bg-gray-300 mx-0.5 audio-controls hidden"></div>
+                    <button id="toggle-audio-btn" class="audio-controls hidden p-2.5 rounded-full hover:bg-emerald-100 text-emerald-600 transition-colors"><svg id="icon-play-audio" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg><svg id="icon-pause-audio" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"></path></svg></button>
+
+                    <div class="w-px h-6 bg-gray-300 mx-0.5 auto-slide-controls hidden"></div>
+                    <button id="toggle-autoplay-btn" class="auto-slide-controls hidden p-2.5 rounded-full hover:bg-purple-100 text-purple-600 transition-colors"><svg id="icon-autoplay-play" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg><svg id="icon-autoplay-pause" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"></path></svg></button>
+
+                    <!-- Khác -->
+                    <div class="w-px h-6 bg-gray-300 mx-0.5"></div>
+                    <button id="rotate-btn" class="p-2.5 rounded-full hover:bg-orange-100 text-orange-600 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button>
+                    <button id="fullscreen-btn" class="p-2.5 rounded-full hover:bg-blue-100 text-blue-600 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg></button>
+                </div>
+
+                <!-- Loader -->
+                <div id="loader" class="hidden absolute inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-40">
+                    <div class="animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent shadow-lg"></div>
+                </div>
+
+                <!-- Lớp phủ Lưới (Grid View) -->
+                <div id="grid-view-overlay" class="absolute inset-0 bg-gray-900/95 z-50 hidden flex-col p-5 backdrop-blur-md overflow-hidden">
+                    <div class="flex justify-between items-center mb-4 shrink-0 border-b border-gray-700 pb-3">
+                        <h3 class="text-white font-bold text-lg">Tổng quan Slide (Q&A)</h3>
+                        <button id="close-grid-btn" class="text-gray-300 hover:text-white hover:bg-gray-700 bg-gray-800 px-3 py-1.5 rounded-lg transition-colors text-sm font-semibold flex items-center gap-2">Đóng <kbd class="bg-gray-600 px-1.5 py-0.5 rounded text-xs font-sans">Esc</kbd></button>
+                    </div>
+                    <div id="grid-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar pb-4 pr-2"></div>
+                </div>
+            </div>
+            
+            <audio id="bg-audio" loop></audio>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const inputElement = document.getElementById('drive-link');
+            const viewButton = document.getElementById('view-btn');
+            const resultImage = document.getElementById('result-image');
+            const placeholderText = document.getElementById('placeholder-text');
+            const errorMessage = document.getElementById('error-message');
+            const loader = document.getElementById('loader');
+            const imageContainer = document.getElementById('image-container');
+
+            // Biến cho điều hướng nhiều ảnh
+            const prevBtn = document.getElementById('prev-btn');
+            const nextBtn = document.getElementById('next-btn');
+            const imageCounter = document.getElementById('image-counter');
+            let slideItems = []; // MỚI: Array chứa slide: { type: 'drive', id: '...', mediaType: 'image'|'video' }
+            let currentImageIndex = 0;
+            let slideDirection = 'next'; // MỚI: Biến theo dõi hướng chuyển trang (prev/next) để tạo hiệu ứng Trượt chính xác
+
+            // Biến quản lý trạng thái lưu trữ và Grid View
+            const resultVideo = document.getElementById('result-video');
+            const isDriveVideoCheckbox = document.getElementById('is-drive-video');
+            const gridViewBtn = document.getElementById('grid-view-btn');
+            const gridViewOverlay = document.getElementById('grid-view-overlay');
+            const gridContainer = document.getElementById('grid-container');
+            const closeGridBtn = document.getElementById('close-grid-btn');
+            const exportJsonBtn = document.getElementById('export-json-btn');
+            const importJsonInput = document.getElementById('import-json-input');
+
+            // Hàm lưu Playlist vào LocalStorage
+            function savePlaylistToStorage() {
+                // Chỉ lưu link Drive vì link máy tính (blob) sẽ chết khi reload trang
+                const savableSlides = slideItems.filter(item => item.type === 'drive');
+                localStorage.setItem('presentation_playlist', JSON.stringify(savableSlides));
+            }
+
+            // Hàm tải Playlist từ LocalStorage khi khởi động
+            function loadPlaylistFromStorage() {
+                try {
+                    const saved = localStorage.getItem('presentation_playlist');
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            slideItems = parsed;
+                            renderPlaylist();
+                        }
+                    }
+                } catch (e) { console.error('Lỗi LocalStorage', e); }
+            }
+
+            // MỚI: Biến cho Tự động chuyển trang
+            let autoSlideTimer = null;
+            let isAutoPlaying = true;
+            const toggleAutoplayBtn = document.getElementById('toggle-autoplay-btn');
+            const iconAutoplayPlay = document.getElementById('icon-autoplay-play');
+            const iconAutoplayPause = document.getElementById('icon-autoplay-pause');
+            const autoSlideControls = document.querySelectorAll('.auto-slide-controls');
+
+            const playlistSection = document.getElementById('playlist-section');
+            const sortableList = document.getElementById('sortable-list');
+            const startPresentationBtn = document.getElementById('start-presentation-btn');
+            let draggedItemIndex = null;
+
+            // Hàm hiển thị danh sách và gắn sự kiện kéo thả
+            function renderPlaylist() {
+                sortableList.innerHTML = '';
+                if (slideItems.length === 0) {
+                    playlistSection.classList.add('hidden');
+                    return;
+                }
+                
+                playlistSection.classList.remove('hidden');
+                
+                slideItems.forEach((item, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg cursor-grab active:cursor-grabbing hover:bg-gray-100 hover:border-gray-300 transition-all shadow-sm';
+                    li.draggable = true;
+                    li.dataset.index = index;
+                    
+                    // Sự kiện kéo thả
+                    li.addEventListener('dragstart', (e) => {
+                        draggedItemIndex = index;
+                        e.dataTransfer.effectAllowed = 'move';
+                        setTimeout(() => { li.classList.add('opacity-40'); }, 0);
+                    });
+                    
+                    li.addEventListener('dragend', () => {
+                        draggedItemIndex = null;
+                        li.classList.remove('opacity-40');
+                        document.querySelectorAll('#sortable-list li').forEach(el => {
+                            el.classList.remove('border-blue-500', 'border-t-2', 'border-b-2', 'pb-3', 'pt-3');
+                        });
+                    });
+                    
+                    li.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        if (draggedItemIndex === null || draggedItemIndex === index) return;
+                        
+                        const rect = li.getBoundingClientRect();
+                        const midY = rect.top + rect.height / 2;
+                        
+                        // Xóa style cũ
+                        li.classList.remove('border-blue-500', 'border-t-2', 'border-b-2', 'pb-3', 'pt-3');
+                        
+                        // Hiển thị dải viền báo hiệu vị trí sẽ thả
+                        if (e.clientY < midY) {
+                            li.classList.add('border-t-2', 'border-blue-500', 'pt-3');
+                        } else {
+                            li.classList.add('border-b-2', 'border-blue-500', 'pb-3');
+                        }
+                    });
+                    
+                    li.addEventListener('dragleave', () => {
+                        li.classList.remove('border-blue-500', 'border-t-2', 'border-b-2', 'pb-3', 'pt-3');
+                    });
+                    
+                    li.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        if (draggedItemIndex === null || draggedItemIndex === index) return;
+                        
+                        const rect = li.getBoundingClientRect();
+                        const midY = rect.top + rect.height / 2;
+                        let targetIndex = index;
+                        
+                        if (e.clientY > midY) targetIndex++;
+                        
+                        const itemToMove = slideItems.splice(draggedItemIndex, 1)[0];
+                        if (draggedItemIndex < targetIndex) targetIndex--; 
+                        slideItems.splice(targetIndex, 0, itemToMove);
+                        
+                        renderPlaylist(); // Cập nhật lại giao diện
+                        savePlaylistToStorage();
+                        
+                        // Cập nhật lại ảnh hiển thị trực tiếp nếu đang chiếu
+                        if (!imageContainer.querySelector('#placeholder-text').style.display || imageContainer.querySelector('#placeholder-text').style.display === 'none') {
+                            if (currentImageIndex === draggedItemIndex) currentImageIndex = targetIndex;
+                            else if (currentImageIndex > draggedItemIndex && currentImageIndex <= targetIndex) currentImageIndex--;
+                            else if (currentImageIndex < draggedItemIndex && currentImageIndex >= targetIndex) currentImageIndex++;
+                            loadImageAtIndex();
+                        }
+                    });
+
+                    // Cấu trúc HTML của một mục
+                    const icon = item.type === 'local' 
+                        ? `<svg class="w-9 h-9 text-blue-500 bg-blue-100 p-2 rounded-md" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>`
+                        : `<svg class="w-9 h-9 text-emerald-500 bg-emerald-100 p-2 rounded-md" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>`;
+                    const title = item.name || (item.type === 'local' ? 'File từ máy tính' : `Google Drive: ${item.id.substring(0, 12)}...`);
+                    const indexBadge = `<span class="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-gray-200 text-gray-600 rounded-full text-xs font-bold">${index + 1}</span>`;
+                    const videoBadge = item.mediaType === 'video' ? `<span class="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-bold uppercase ml-2">Video</span>` : '';
+
+                    li.innerHTML = `
+                        <div class="cursor-move text-gray-400 hover:text-gray-800 px-1 py-2" title="Kéo để di chuyển">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path></svg>
+                        </div>
+                        ${indexBadge}
+                        ${icon}
+                        <div class="flex-1 truncate text-sm font-semibold text-gray-700 flex items-center">${title} ${videoBadge}</div>
+                        
+                        <!-- MỚI: Ô nhập thời gian tự động chuyển slide -->
+                        <div class="flex items-center gap-1 bg-white border border-gray-300 rounded px-2 py-1 shadow-inner mr-2" title="Số giây tự động chuyển (để trống nếu không muốn tự chuyển)">
+                            <input type="number" min="1" max="3600" class="duration-input w-12 text-sm text-center outline-none text-gray-700 font-medium" placeholder="Giây" value="${item.duration || ''}">
+                            <span class="text-xs text-gray-500 font-medium hidden sm:inline">giây</span>
+                            <span class="text-xs text-gray-500 font-medium sm:hidden">s</span>
+                        </div>
+
+                        <button class="delete-btn p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Xóa ảnh này">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    `;
+
+                    // MỚI: Sự kiện lưu thời gian
+                    const durationInput = li.querySelector('.duration-input');
+                    durationInput.addEventListener('change', (e) => {
+                        const val = parseInt(e.target.value);
+                        if (!isNaN(val) && val > 0) {
+                            slideItems[index].duration = val;
+                        } else {
+                            slideItems[index].duration = null;
+                            e.target.value = '';
+                        }
+                        savePlaylistToStorage();
+                    });
+
+                    li.querySelector('.delete-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        slideItems.splice(index, 1);
+                        renderPlaylist();
+                        
+                        // Nếu đang trình chiếu mà xóa ảnh, tự động chuyển trang
+                        if (slideItems.length > 0 && (!imageContainer.querySelector('#placeholder-text').style.display || imageContainer.querySelector('#placeholder-text').style.display === 'none')) {
+                            if (currentImageIndex >= slideItems.length) currentImageIndex = slideItems.length - 1;
+                            loadImageAtIndex();
+                        } else if (slideItems.length === 0) {
+                            // Reset nếu xóa hết
+                            imageContainer.classList.add('bg-gray-200');
+                            imageContainer.classList.remove('bg-transparent');
+                            resultImage.style.display = 'none';
+                            placeholderText.style.display = 'block';
+                            toolbar.classList.add('hidden');
+                            toolbar.classList.remove('flex');
+                            imageCounter.classList.add('hidden');
+                            prevBtn.classList.add('hidden');
+                            nextBtn.classList.add('hidden');
+                            clearTimeout(autoSlideTimer); // MỚI: Xóa timer nếu xóa hết ảnh
+                            autoSlideControls.forEach(el => el.classList.add('hidden'));
+                        }
+                        savePlaylistToStorage();
+                    });
+                    
+                    sortableList.appendChild(li);
+                });
+                
+                savePlaylistToStorage();
+            }
+
+            // Nạp dữ liệu lúc mới vào web
+            loadPlaylistFromStorage();
+
+            // Tính năng XUẤT File JSON
+            exportJsonBtn.addEventListener('click', () => {
+                const savableSlides = slideItems.filter(item => item.type === 'drive');
+                if (savableSlides.length === 0) {
+                    alert('Chưa có liên kết Google Drive nào. Tính năng này không hỗ trợ lưu ảnh tải trực tiếp từ máy tính (vì lý do bảo mật trình duyệt).');
+                    return;
+                }
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(savableSlides));
+                const downloadAnchor = document.createElement('a');
+                downloadAnchor.setAttribute("href", dataStr);
+                downloadAnchor.setAttribute("download", "playlist_slide.json");
+                document.body.appendChild(downloadAnchor);
+                downloadAnchor.click();
+                downloadAnchor.remove();
+            });
+
+            // Tính năng NHẬP File JSON
+            importJsonInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        const importedSlides = JSON.parse(event.target.result);
+                        if (Array.isArray(importedSlides)) {
+                            slideItems = [...slideItems, ...importedSlides];
+                            renderPlaylist();
+                            importJsonInput.value = ''; // Reset
+                        }
+                    } catch(err) {
+                        alert('Định dạng file không đúng chuẩn JSON.');
+                    }
+                };
+                reader.readAsText(file);
+            });
+
+            // MỚI: Xử lý bật/tắt Tự động chuyển slide
+            toggleAutoplayBtn.addEventListener('click', () => {
+                isAutoPlaying = !isAutoPlaying;
+                if (isAutoPlaying) {
+                    iconAutoplayPlay.classList.add('hidden');
+                    iconAutoplayPause.classList.remove('hidden');
+                    startAutoSlide(); // Tiếp tục đếm
+                } else {
+                    iconAutoplayPlay.classList.remove('hidden');
+                    iconAutoplayPause.classList.add('hidden');
+                    clearTimeout(autoSlideTimer); // Dừng đếm
+                }
+            });
+
+            // MỚI: Hàm khởi động đếm ngược
+            function startAutoSlide() {
+                clearTimeout(autoSlideTimer);
+                if (!isAutoPlaying || slideItems.length === 0) return;
+
+                const currentSlide = slideItems[currentImageIndex];
+                if (currentSlide && currentSlide.duration && currentSlide.duration > 0) {
+                    // Hiển thị nút AutoPlay nếu có ảnh được cài thời gian
+                    autoSlideControls.forEach(el => el.classList.remove('hidden'));
+                    
+                    autoSlideTimer = setTimeout(() => {
+                        // Chuyển sang ảnh kế tiếp, nếu hết thì vòng lại
+                        if (currentImageIndex < slideItems.length - 1) {
+                            currentImageIndex++;
+                        } else {
+                            currentImageIndex = 0;
+                        }
+                        loadImageAtIndex();
+                    }, currentSlide.duration * 1000);
+                }
+            }
+
+            // Nút Bắt đầu trình chiếu
+            startPresentationBtn.addEventListener('click', () => {
+                if (slideItems.length > 0) {
+                    currentImageIndex = 0;
+                    loadImageAtIndex();
+                    // Đã loại bỏ cuộn màn hình vì ứng dụng giờ hoạt động như một cửa sổ cố định 16:9
+                }
+            });
+
+            // Xử lý khi người dùng chọn nhiều ảnh từ máy tính
+            const localImageInput = document.getElementById('local-image-input');
+            localImageInput.addEventListener('change', (e) => {
+                const files = e.target.files;
+                if (!files || files.length === 0) return;
+
+                clearError();
+                
+                // Lặp qua danh sách file và tạo URL tạm thời cho trình duyệt
+                Array.from(files).forEach(file => {
+                    const isVideo = file.type.startsWith('video/');
+                    if (file.type.startsWith('image/') || isVideo) {
+                        const objectUrl = URL.createObjectURL(file);
+                        slideItems.push({ 
+                            type: 'local', 
+                            url: objectUrl, 
+                            name: file.name,
+                            mediaType: isVideo ? 'video' : 'image' 
+                        });
+                    }
+                });
+
+                if (slideItems.length > 0) {
+                    renderPlaylist(); // Cập nhật danh sách thay vì trình chiếu ngay
+                    inputElement.value = ''; // Xóa ô nhập Drive
+                } else {
+                    showError('Vui lòng chọn tệp định dạng hình ảnh.');
+                }
+            });
+
+            // --- BẮT ĐẦU: Các biến và logic cho chức năng Âm thanh ---
+            const audioInput = document.getElementById('audio-input');
+            const audioFileName = document.getElementById('audio-file-name');
+            const bgAudio = document.getElementById('bg-audio');
+            const toggleAudioBtn = document.getElementById('toggle-audio-btn');
+            const iconPlayAudio = document.getElementById('icon-play-audio');
+            const iconPauseAudio = document.getElementById('icon-pause-audio');
+            const audioControls = document.querySelectorAll('.audio-controls');
+
+            // Xử lý khi người dùng chọn file âm thanh
+            audioInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    audioFileName.textContent = file.name;
+                    audioFileName.classList.add('text-emerald-600', 'font-semibold');
+                    
+                    // Tạo URL tạm thời cho file âm thanh để phát
+                    const objectUrl = URL.createObjectURL(file);
+                    bgAudio.src = objectUrl;
+                    
+                    // Hiển thị nút Play nhạc trong Toolbar
+                    audioControls.forEach(el => el.classList.remove('hidden'));
+                    
+                    // Đặt lại trạng thái icon về Play
+                    iconPlayAudio.classList.remove('hidden');
+                    iconPauseAudio.classList.add('hidden');
+                } else {
+                    audioFileName.textContent = 'Chưa chọn tệp nào';
+                    audioFileName.classList.remove('text-emerald-600', 'font-semibold');
+                    bgAudio.src = '';
+                    // Ẩn nút nếu không có nhạc
+                    audioControls.forEach(el => el.classList.add('hidden'));
+                }
+            });
+
+            // Xử lý bật/tắt nhạc khi nhấn nút trên Toolbar
+            toggleAudioBtn.addEventListener('click', () => {
+                if (bgAudio.paused) {
+                    bgAudio.play();
+                    iconPlayAudio.classList.add('hidden');
+                    iconPauseAudio.classList.remove('hidden');
+                } else {
+                    bgAudio.pause();
+                    iconPlayAudio.classList.remove('hidden');
+                    iconPauseAudio.classList.add('hidden');
+                }
+            });
+            // --- KẾT THÚC: Logic Âm thanh ---
+
+            // --- BẮT ĐẦU: Các biến và logic cho chức năng Trình chiếu ---
+            const canvas = document.getElementById('drawing-canvas');
+            const ctx = canvas.getContext('2d');
+            const laserDot = document.getElementById('laser-dot');
+            const toolbar = document.getElementById('presentation-toolbar');
+            const toolBtns = document.querySelectorAll('.tool-btn');
+            const clearBtn = document.getElementById('clear-canvas');
+            const fullscreenBtn = document.getElementById('fullscreen-btn');
+            const rotateBtn = document.getElementById('rotate-btn'); // MỚI
+            const transitionEffectSelect = document.getElementById('transition-effect'); // MỚI
+            const allEffectClasses = ['fade-in', 'slide-right-in', 'slide-left-in', 'zoom-out-effect', 'flip-3d-effect', 'dissolve-effect'];
+
+            // Biến cho chức năng Zoom
+            const zoomWrapper = document.getElementById('zoom-wrapper');
+            let isZoomed = false;
+            let currentZoomScale = 1;
+
+            // CẬP NHẬT: Các biến mới cho cài đặt bút
+            const toolSettings = document.getElementById('tool-settings');
+            const penColor = document.getElementById('pen-color');
+            const penSize = document.getElementById('pen-size');
+
+            let currentTool = 'none'; // Các trạng thái: 'none', 'pen', 'highlighter', 'laser'
+            let isDrawing = false;
+            let lastX = 0;
+            let lastY = 0;
+
+            // Hàm đồng bộ kích thước Canvas khớp chuẩn với container
+            function resizeCanvas() {
+                canvas.width = imageContainer.clientWidth;
+                canvas.height = imageContainer.clientHeight;
+            }
+            window.addEventListener('resize', resizeCanvas);
+
+            // Cập nhật giao diện khi chọn công cụ trình chiếu
+            toolBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    // Highlight nút đang được chọn
+                    toolBtns.forEach(b => {
+                        b.classList.remove('bg-gray-200');
+                        b.classList.add('hover:bg-gray-200');
+                    });
+                    e.currentTarget.classList.remove('hover:bg-gray-200');
+                    e.currentTarget.classList.add('bg-gray-200');
+
+                    currentTool = e.currentTarget.dataset.tool;
+
+                    // Thay đổi trạng thái hiển thị của Canvas, Laze và Cài đặt
+                    if (currentTool === 'none') {
+                        canvas.classList.add('hidden');
+                        laserDot.classList.add('hidden');
+                        toolSettings.classList.add('hidden');
+                        toolSettings.classList.remove('flex');
+                        imageContainer.style.cursor = 'default';
+                    } else if (currentTool === 'zoom') {
+                        // Kính lúp cần canvas mở để hứng sự kiện click chuột
+                        canvas.classList.remove('hidden'); 
+                        laserDot.classList.add('hidden');
+                        toolSettings.classList.add('hidden');
+                        toolSettings.classList.remove('flex');
+                        imageContainer.style.cursor = isZoomed ? 'zoom-out' : 'zoom-in';
+                    } else if (currentTool === 'laser') {
+                        canvas.classList.add('hidden');
+                        // Reset vị trí laze ra giữa màn hình tạm thời khi vừa bật
+                        laserDot.style.left = '50%';
+                        laserDot.style.top = '50%';
+                        laserDot.classList.remove('hidden');
+                        toolSettings.classList.add('hidden');
+                        toolSettings.classList.remove('flex');
+                        imageContainer.style.cursor = 'none'; // Ẩn chuột mặc định để laze nổi bật
+                    } else {
+                        canvas.classList.remove('hidden');
+                        laserDot.classList.add('hidden');
+                        toolSettings.classList.remove('hidden');
+                        toolSettings.classList.add('flex');
+                        imageContainer.style.cursor = 'crosshair';
+                        
+                        // Đặt kích thước và màu mặc định phù hợp với từng loại bút khi vừa chọn
+                        if (currentTool === 'highlighter') {
+                            penSize.value = 30; // Dạ quang mặc định to hơn
+                            penColor.value = '#facc15'; // Màu vàng
+                        } else if (currentTool === 'pen') {
+                            penSize.value = 4; // Bút mực mặc định nhỏ
+                            penColor.value = '#ef4444'; // Màu đỏ
+                        }
+                    }
+                });
+            });
+
+            // Lấy tọa độ chuột (hỗ trợ cả chạm trên màn hình cảm ứng)
+            function getPos(e) {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                // CẬP NHẬT: Chia cho tỷ lệ zoom để nét vẽ luôn chuẩn xác ngay cả khi ảnh bị phóng to
+                return {
+                    x: (clientX - rect.left) / currentZoomScale,
+                    y: (clientY - rect.top) / currentZoomScale
+                };
+            }
+
+            // Bắt đầu vẽ
+            function startDrawing(e) {
+                if (currentTool !== 'pen' && currentTool !== 'highlighter') return;
+                isDrawing = true;
+                const pos = getPos(e);
+                lastX = pos.x;
+                lastY = pos.y;
+                if(e.type === 'touchstart') e.preventDefault(); // Tránh cuộn trang khi vẽ bằng điện thoại
+            }
+
+            // Quá trình vẽ
+            function draw(e) {
+                if (!isDrawing) return;
+                if(e.type === 'touchmove') e.preventDefault();
+
+                const pos = getPos(e);
+                
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+                ctx.lineTo(pos.x, pos.y);
+                
+                // CẬP NHẬT: Áp dụng màu và kích thước động từ thanh cài đặt
+                ctx.strokeStyle = penColor.value; 
+                ctx.lineWidth = parseInt(penSize.value);
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round'; // Nét vẽ liên tục góc mượt hơn
+                
+                if (currentTool === 'pen') {
+                    ctx.globalAlpha = 1.0;
+                } else if (currentTool === 'highlighter') {
+                    ctx.globalAlpha = 0.4; // Độ trong suốt cho dạ quang
+                }
+                
+                ctx.stroke();
+                lastX = pos.x;
+                lastY = pos.y;
+            }
+
+            // Dừng vẽ
+            function stopDrawing() {
+                isDrawing = false;
+            }
+
+            // Gắn sự kiện vẽ
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+            canvas.addEventListener('touchstart', startDrawing, {passive: false});
+            canvas.addEventListener('touchmove', draw, {passive: false});
+            canvas.addEventListener('touchend', stopDrawing);
+
+            // CẬP NHẬT: Xử lý sự kiện click để Zoom
+            canvas.addEventListener('click', (e) => {
+                if (currentTool !== 'zoom') return;
+                
+                if (!isZoomed) {
+                    // Trạng thái: Đang thu nhỏ -> Cần phóng to
+                    const rect = zoomWrapper.getBoundingClientRect();
+                    
+                    // Tính toán tọa độ điểm click tương đối bên trong khung hình
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    
+                    // Lấy điểm click làm tâm (transform-origin) và phóng to 2x
+                    zoomWrapper.style.transformOrigin = `${x}px ${y}px`;
+                    zoomWrapper.style.transform = 'scale(2)';
+                    currentZoomScale = 2;
+                    isZoomed = true;
+                    imageContainer.style.cursor = 'zoom-out'; // Đổi icon chuột
+                } else {
+                    // Trạng thái: Đang phóng to -> Cần thu nhỏ về mặc định
+                    zoomWrapper.style.transformOrigin = 'center center';
+                    zoomWrapper.style.transform = 'scale(1)';
+                    currentZoomScale = 1;
+                    isZoomed = false;
+                    imageContainer.style.cursor = 'zoom-in';
+                }
+            });
+
+            // CẬP NHẬT: Hàm xử lý vị trí Tia Laze chính xác (Hỗ trợ chuột và cảm ứng)
+            function updateLaserPosition(e) {
+                if (currentTool === 'laser') {
+                    const rect = imageContainer.getBoundingClientRect();
+                    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    
+                    const x = clientX - rect.left;
+                    const y = clientY - rect.top;
+                    
+                    laserDot.style.left = `${x}px`;
+                    laserDot.style.top = `${y}px`;
+                }
+            }
+
+            // Điều khiển Tia Laze (Di chuyển div phát sáng)
+            imageContainer.addEventListener('mousemove', updateLaserPosition);
+            
+            // Hỗ trợ laze trên màn hình cảm ứng (điện thoại/tablet)
+            imageContainer.addEventListener('touchmove', (e) => {
+                if (currentTool === 'laser') {
+                    e.preventDefault(); // Ngăn cuộn trang
+                    updateLaserPosition(e);
+                }
+            }, {passive: false});
+            
+            // Ẩn/hiện laze khi chuột ra/vào khu vực ảnh (Sử dụng classList thay vì style.display để không xung đột Tailwind)
+            imageContainer.addEventListener('mouseenter', () => {
+                if (currentTool === 'laser') laserDot.classList.remove('hidden');
+            });
+            imageContainer.addEventListener('mouseleave', () => {
+                if (currentTool === 'laser') laserDot.classList.add('hidden');
+            });
+            imageContainer.addEventListener('touchstart', () => {
+                if (currentTool === 'laser') laserDot.classList.remove('hidden');
+            });
+            imageContainer.addEventListener('touchend', () => {
+                if (currentTool === 'laser') laserDot.classList.add('hidden');
+            });
+
+            // Nút Xóa bản vẽ
+            clearBtn.addEventListener('click', () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            });
+
+            // Tính năng Phóng Toàn màn hình
+            fullscreenBtn.addEventListener('click', () => {
+                if (!document.fullscreenElement) {
+                    if (imageContainer.requestFullscreen) {
+                        imageContainer.requestFullscreen();
+                    } else if (imageContainer.webkitRequestFullscreen) {
+                        imageContainer.webkitRequestFullscreen();
+                    } else if (imageContainer.msRequestFullscreen) {
+                        imageContainer.msRequestFullscreen();
+                    }
+                } else {
+                    if (document.exitFullscreen) {
+                        document.exitFullscreen();
+                    }
+                }
+            });
+
+            // Lắng nghe sự kiện chuyển đổi toàn màn hình để tùy chỉnh giao diện
+            document.addEventListener('fullscreenchange', () => {
+                if (document.fullscreenElement) {
+                    // Khi chiếu Fullscreen, sidebar tự động bị che, ta đổi nền chiếu thành màu đen
+                    imageContainer.classList.add('bg-black'); 
+                    imageContainer.classList.remove('bg-gray-200');
+                } else {
+                    imageContainer.classList.remove('bg-black');
+                    imageContainer.classList.add('bg-gray-200');
+                }
+                setTimeout(resizeCanvas, 100); // Tính lại kích thước để vẽ không bị lệch tọa độ
+            });
+
+            // MỚI: Logic xoay ảnh 90 độ
+            rotateBtn.addEventListener('click', () => {
+                if (slideItems.length === 0) return;
+                
+                const slide = slideItems[currentImageIndex];
+                // Tăng góc xoay lên 90 độ (lưu vào biến của từng ảnh để không bị mất khi chuyển trang)
+                slide.rotation = (slide.rotation || 0) + 90;
+                if (slide.rotation >= 360) slide.rotation = 0;
+                
+                const activeMedia = slide.mediaType === 'video' ? resultVideo : resultImage;
+                
+                // Áp dụng góc xoay bằng CSS native rotate (không dùng transform để tránh xung đột với animation/zoom)
+                activeMedia.style.rotate = `${slide.rotation}deg`;
+                activeMedia.style.transition = 'rotate 0.3s ease'; // Thêm hiệu ứng mượt
+                
+                // Quan trọng: Phải xóa bản vẽ đi vì tọa độ chuột không còn khớp với ảnh đã bị xoay
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            });
+
+            // Logic Chế độ Lưới (Grid View)
+            gridViewBtn.addEventListener('click', () => {
+                if (slideItems.length === 0) return;
+                gridViewOverlay.classList.remove('hidden');
+                gridViewOverlay.classList.add('flex');
+                
+                if (isAutoPlaying) clearTimeout(autoSlideTimer);
+                if (!resultVideo.paused) resultVideo.pause();
+                
+                renderGridView();
+            });
+
+            closeGridBtn.addEventListener('click', () => {
+                gridViewOverlay.classList.add('hidden');
+                gridViewOverlay.classList.remove('flex');
+                if (isAutoPlaying) startAutoSlide();
+            });
+
+            function renderGridView() {
+                gridContainer.innerHTML = '';
+                slideItems.forEach((slide, index) => {
+                    const div = document.createElement('div');
+                    div.className = `aspect-video bg-gray-800 rounded-lg overflow-hidden cursor-pointer border-2 hover:border-blue-400 transition-all group ${index === currentImageIndex ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.7)]' : 'border-transparent'}`;
+                    
+                    const innerContent = document.createElement('div');
+                    innerContent.className = 'w-full h-full flex items-center justify-center text-gray-500 relative bg-black/30';
+                    
+                    const badge = document.createElement('span');
+                    badge.className = 'absolute top-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded shadow-sm font-bold z-10 group-hover:bg-blue-600 transition-colors';
+                    badge.textContent = index + 1;
+                    innerContent.appendChild(badge);
+
+                    if (slide.mediaType === 'video') {
+                        innerContent.innerHTML += `<svg class="w-10 h-10 z-0 text-white/50" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>`;
+                    } else {
+                        const img = document.createElement('img');
+                        img.className = 'w-full h-full object-cover z-0 opacity-60 group-hover:opacity-100 transition-opacity';
+                        if (slide.type === 'local') {
+                            img.src = slide.url;
+                        } else {
+                            img.src = `https://drive.google.com/thumbnail?id=${slide.id}&sz=w400-h400`;
+                        }
+                        img.onerror = () => { img.style.display = 'none'; innerContent.innerHTML += `<span class="text-xs">Lỗi hiển thị</span>`; };
+                        innerContent.appendChild(img);
+                    }
+
+                    div.appendChild(innerContent);
+                    
+                    div.addEventListener('click', () => {
+                        currentImageIndex = index;
+                        gridViewOverlay.classList.add('hidden');
+                        gridViewOverlay.classList.remove('flex');
+                        loadImageAtIndex();
+                    });
+                    
+                    gridContainer.appendChild(div);
+                });
+            }
+            // --- KẾT THÚC: Logic Trình chiếu ---
+
+            /**
+             * Hàm trích xuất File ID từ liên kết Google Drive
+             * Hỗ trợ các định dạng phổ biến:
+             * 1. https://drive.google.com/file/d/FILE_ID/view...
+             * 2. https://drive.google.com/open?id=FILE_ID
+             */
+            function extractFileId(url) {
+                try {
+                    // Cách 1: Sử dụng URL Object nếu là link hợp lệ
+                    const urlObj = new URL(url);
+                    
+                    // Kiểm tra định dạng open?id=...
+                    if (urlObj.searchParams.has('id')) {
+                        return urlObj.searchParams.get('id');
+                    }
+                } catch (e) {
+                    // Bỏ qua lỗi parse URL, chuyển sang dùng Regex
+                }
+
+                // Cách 2: Sử dụng Regular Expression cho định dạng /file/d/...
+                const regex = /\/file\/d\/([a-zA-Z0-9_-]+)/;
+                const match = url.match(regex);
+                if (match && match[1]) {
+                    return match[1];
+                }
+
+                return null;
+            }
+
+            /**
+             * Hiển thị thông báo lỗi
+             */
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorMessage.classList.remove('hidden');
+                errorMessage.classList.add('block');
+                
+                // Ẩn ảnh và loader
+                resultImage.style.display = 'none';
+                loader.classList.add('hidden');
+                
+                prevBtn.classList.add('hidden');
+                nextBtn.classList.add('hidden');
+                imageCounter.classList.add('hidden');
+                toolbar.classList.add('hidden');
+                toolbar.classList.remove('flex');
+                
+                placeholderText.style.display = 'block';
+                imageContainer.classList.remove('bg-transparent');
+                imageContainer.classList.add('bg-gray-200');
+            }
+
+            /**
+             * Xóa thông báo lỗi
+             */
+            function clearError() {
+                errorMessage.classList.add('hidden');
+                errorMessage.classList.remove('block');
+            }
+
+            /**
+             * MỚI: Hàm xử lý áp dụng hiệu ứng chuyển cảnh và góc xoay
+             */
+            function applyEffectsToMedia(targetElement) {
+                targetElement.style.display = 'block';
+                
+                // 1. Phục hồi góc xoay đã lưu của ảnh
+                const currentRotation = slideItems[currentImageIndex].rotation || 0;
+                targetElement.style.rotate = `${currentRotation}deg`;
+                targetElement.style.transition = 'none'; // Tắt transition xoay lúc vừa tải
+                
+                // 2. Chạy hiệu ứng chuyển cảnh
+                targetElement.classList.remove(...allEffectClasses);
+                void targetElement.offsetWidth; // Trigger reflow để restart animation
+                
+                let selectedEffect = transitionEffectSelect.value;
+                
+                // Logic xử lý riêng cho hiệu ứng Trượt (Slide) để biết trượt từ trái hay phải
+                if (selectedEffect === 'slide') {
+                    selectedEffect = slideDirection === 'next' ? 'slide-right-in' : 'slide-left-in';
+                }
+                
+                targetElement.classList.add(selectedEffect);
+            }
+
+            /**
+             * Tải ảnh dựa trên chỉ mục hiện tại trong danh sách (Hỗ trợ cả Local và Drive)
+             */
+            function loadImageAtIndex() {
+                if (slideItems.length === 0) return;
+                
+                clearTimeout(autoSlideTimer); // MỚI: Dừng timer cũ trước khi tải ảnh mới
+
+                const slide = slideItems[currentImageIndex];
+                
+                // Cập nhật UI bộ đếm và nút
+                imageCounter.textContent = `${currentImageIndex + 1} / ${slideItems.length}`;
+                imageCounter.classList.remove('hidden');
+                
+                if (currentImageIndex > 0) prevBtn.classList.remove('hidden');
+                else prevBtn.classList.add('hidden');
+                
+                if (currentImageIndex < slideItems.length - 1) nextBtn.classList.remove('hidden');
+                else nextBtn.classList.add('hidden');
+
+                // Dừng và reset video cũ
+                resultVideo.pause();
+                resultVideo.removeAttribute('src');
+                resultVideo.load();
+
+                // Ẩn cả 2 thẻ media để chuẩn bị
+                resultImage.style.display = 'none';
+                resultVideo.style.display = 'none';
+
+                // Reset trạng thái Zoom khi tự động chuyển sang ảnh mới
+                if (isZoomed) {
+                    zoomWrapper.style.transformOrigin = 'center center';
+                    zoomWrapper.style.transform = 'scale(1)';
+                    currentZoomScale = 1;
+                    isZoomed = false;
+                    if (currentTool === 'zoom') imageContainer.style.cursor = 'zoom-in';
+                }
+
+                // Xóa bản vẽ cũ khi sang ảnh mới
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Ẩn placeholder, hiện loader
+                placeholderText.style.display = 'none';
+                loader.classList.remove('hidden');
+                
+                imageContainer.classList.remove('bg-gray-200');
+                imageContainer.classList.add('bg-transparent');
+
+                const isVideo = slide.mediaType === 'video';
+                const activeMedia = isVideo ? resultVideo : resultImage;
+
+                if (slide.type === 'local') {
+                    // XỬ LÝ: Tải media từ thiết bị Local
+                    activeMedia.src = slide.url;
+                    
+                    if (isVideo) {
+                        loader.classList.add('hidden');
+                        applyEffectsToMedia(activeMedia);
+                        activeMedia.play().catch(e => console.log('Không thể Auto-play video', e));
+                        toolbar.classList.remove('hidden');
+                        toolbar.classList.add('flex');
+                        resizeCanvas();
+                        startAutoSlide();
+                    } else {
+                        activeMedia.onload = () => {
+                            loader.classList.add('hidden');
+                            applyEffectsToMedia(activeMedia);
+                            toolbar.classList.remove('hidden');
+                            toolbar.classList.add('flex');
+                            resizeCanvas();
+                            startAutoSlide();
+                        };
+
+                        activeMedia.onerror = () => {
+                            loader.classList.add('hidden');
+                            showError(`Không thể tải file thứ ${currentImageIndex + 1} từ máy tính.`);
+                            activeMedia.src = '';
+                            startAutoSlide(); 
+                        };
+                    }
+                } else if (slide.type === 'drive') {
+                    // XỬ LÝ: Tải media từ Google Drive
+                    if (isVideo) {
+                        // Tải Video qua Endpoint Download của Google
+                        activeMedia.src = `https://drive.google.com/uc?export=download&id=${slide.id}`;
+                        loader.classList.add('hidden');
+                        applyEffectsToMedia(activeMedia);
+                        activeMedia.play().catch(e => console.log('Không thể Auto-play video', e));
+                        toolbar.classList.remove('hidden');
+                        toolbar.classList.add('flex');
+                        resizeCanvas();
+                        startAutoSlide();
+                    } else {
+                        const imageUrls = [
+                            `https://drive.google.com/thumbnail?id=${slide.id}&sz=w2500-h2500`, 
+                            `https://lh3.googleusercontent.com/d/${slide.id}`,                 
+                            `https://drive.google.com/uc?export=view&id=${slide.id}`           
+                        ];
+
+                        let currentUrlIndex = 0;
+
+                        function tryLoadImage() {
+                            if (currentUrlIndex >= imageUrls.length) {
+                                loader.classList.add('hidden');
+                                showError(`Không thể tải ảnh thứ ${currentImageIndex + 1}. Tệp có thể bị lỗi.`);
+                                activeMedia.src = ''; 
+                                startAutoSlide();
+                                return;
+                            }
+                            activeMedia.src = imageUrls[currentUrlIndex];
+                        }
+
+                        activeMedia.onload = () => {
+                            loader.classList.add('hidden');
+                            applyEffectsToMedia(activeMedia);
+                            toolbar.classList.remove('hidden');
+                            toolbar.classList.add('flex');
+                            resizeCanvas();
+                            startAutoSlide();
+                        };
+
+                        activeMedia.onerror = () => {
+                            currentUrlIndex++; 
+                            tryLoadImage();    
+                        };
+
+                        tryLoadImage();
+                    }
+                }
+            }
+
+            /**
+             * Xử lý sự kiện khi nhấn nút "Thêm Link Vào Danh Sách"
+             */
+            function handleViewImage() {
+                const inputText = inputElement.value.trim();
+                
+                if (!inputText) {
+                    showError('Vui lòng nhập ít nhất một liên kết Google Drive.');
+                    return;
+                }
+
+                clearError();
+                
+                // Tách từng dòng và trích xuất ID
+                const lines = inputText.split('\n');
+                let added = 0;
+                const isVideo = isDriveVideoCheckbox.checked; // MỚI
+                
+                lines.forEach(line => {
+                    const url = line.trim();
+                    if (url) {
+                        const fileId = extractFileId(url);
+                        if (fileId) {
+                            slideItems.push({ 
+                                type: 'drive', 
+                                id: fileId,
+                                mediaType: isVideo ? 'video' : 'image' 
+                            });
+                            added++;
+                        }
+                    }
+                });
+
+                if (added === 0) {
+                    showError('Không tìm thấy liên kết hợp lệ nào.');
+                    return;
+                }
+
+                inputElement.value = ''; // Xóa ô input sau khi thêm thành công
+                isDriveVideoCheckbox.checked = false; // Reset checkbox
+                renderPlaylist(); // Cập nhật danh sách thay vì chiếu ngay
+            }
+
+            // Gắn sự kiện click cho nút tải ảnh
+            viewButton.addEventListener('click', handleViewImage);
+            
+            // Gắn sự kiện cho nút điều hướng mũi tên (trên màn hình)
+            prevBtn.addEventListener('click', () => {
+                if (currentImageIndex > 0) {
+                    slideDirection = 'prev'; // Ghi nhận hướng
+                    currentImageIndex--;
+                    loadImageAtIndex();
+                }
+            });
+            
+            nextBtn.addEventListener('click', () => {
+                if (currentImageIndex < slideItems.length - 1) {
+                    slideDirection = 'next'; // Ghi nhận hướng
+                    currentImageIndex++;
+                    loadImageAtIndex();
+                }
+            });
+
+            // MỚI: Hệ thống Phím tắt thông minh (Hotkeys)
+            document.addEventListener('keydown', (e) => {
+                // Vô hiệu hóa phím tắt nếu người dùng đang gõ phím vào ô textarea/input
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                if (slideItems.length > 0) {
+                    // Mũi tên Trái/Phải để chuyển slide (Chỉ hoạt động khi Grid View đang đóng)
+                    if (e.key === 'ArrowLeft' && currentImageIndex > 0 && gridViewOverlay.classList.contains('hidden')) {
+                        slideDirection = 'prev';
+                        currentImageIndex--;
+                        loadImageAtIndex();
+                    } else if (e.key === 'ArrowRight' && currentImageIndex < slideItems.length - 1 && gridViewOverlay.classList.contains('hidden')) {
+                        slideDirection = 'next';
+                        currentImageIndex++;
+                        loadImageAtIndex();
+                    }
+                    
+                    // Phím tắt gọi công cụ (P = Pen, H = Highlighter, L = Laser)
+                    if (e.key.toLowerCase() === 'p') {
+                        document.querySelector('[data-tool="pen"]').click();
+                    } else if (e.key.toLowerCase() === 'h') {
+                        document.querySelector('[data-tool="highlighter"]').click();
+                    } else if (e.key.toLowerCase() === 'l') {
+                        document.querySelector('[data-tool="laser"]').click();
+                    }
+                }
+                
+                // Phím Esc đa năng
+                if (e.key === 'Escape') {
+                    // 1. Tắt chế độ lưới nếu đang mở
+                    if (!gridViewOverlay.classList.contains('hidden')) {
+                        closeGridBtn.click();
+                    }
+                    // 2. Nếu đang dùng bút/laze, thoát ra con trỏ chuột
+                    else if (currentTool !== 'none') {
+                        document.querySelector('[data-tool="none"]').click();
+                    }
+                }
+            });
+
+            // Xóa thông báo lỗi khi người dùng bắt đầu nhập lại
+            inputElement.addEventListener('input', clearError);
+        });
+    </script>
+</body>
+</html>
